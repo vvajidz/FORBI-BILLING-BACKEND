@@ -81,16 +81,25 @@ const deleteInvoice = async (id) => {
             let settings = await Settings.findOne();
             const creditPointsToRemove = settings ? Math.floor(invoice.grandTotal / settings.creditPointsPerAmount) : 0;
 
-            await Customer.findByIdAndUpdate(
-                invoice.customer,
-                {
-                    $inc: {
-                        outstanding: -invoice.balance,
-                        totalBilling: -invoice.grandTotal,
-                        creditPoints: -creditPointsToRemove
+            // Safely update customer: decrement outstanding and totalBilling,
+            // and ensure creditPoints never becomes negative.
+            const customer = await Customer.findById(invoice.customer).lean();
+            if (customer) {
+                const newCreditPoints = Math.max(0, (customer.creditPoints || 0) - creditPointsToRemove);
+
+                await Customer.findByIdAndUpdate(
+                    invoice.customer,
+                    {
+                        $inc: {
+                            outstanding: -invoice.balance,
+                            totalBilling: -invoice.grandTotal
+                        },
+                        $set: {
+                            creditPoints: newCreditPoints
+                        }
                     }
-                }
-            );
+                );
+            }
         }
 
         // Soft delete the invoice
